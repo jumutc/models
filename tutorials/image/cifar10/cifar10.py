@@ -300,10 +300,10 @@ def loss(logits, labels, logits_val):
   probabilities_val = tf.add(tf.nn.softmax(logits_val), tf.constant(0.0001))
 
   for i in range(cifar10_input.NUM_CLASSES):
-    hist_train = tf.histogram_fixed_width(tf.log(probabilities_train[:,i]), [0., 1.])
-    hist_train = tf.divide(tf.cast(hist_train, tf.float32), tf.constant(100.))
-    hist_val = tf.histogram_fixed_width(tf.log(probabilities_val[:,i]), [0., 1.])
-    hist_val = tf.divide(tf.cast(hist_val, tf.float32), tf.constant(100.))
+    hist_train = tf.histogram_fixed_width(tf.log(probabilities_train[:,i]), [0., 1.], nbins=10)
+    hist_train = tf.divide(tf.cast(hist_train, tf.float32), tf.constant(FLAGS.batch_size))
+    hist_val = tf.histogram_fixed_width(tf.log(probabilities_val[:,i]), [0., 1.], nbins=10)
+    hist_val = tf.divide(tf.cast(hist_val, tf.float32), tf.constant(FLAGS.batch_size))
     tf.add_to_collection('losses', _kl_divergence(hist_train, hist_val, 'kl_divergence_%d' % i))
 
 

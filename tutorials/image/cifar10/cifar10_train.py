@@ -38,6 +38,7 @@ from __future__ import print_function
 
 from datetime import datetime
 import time
+import sys
 
 import tensorflow as tf
 
@@ -80,10 +81,15 @@ def train():
     # updates the model parameters.
     train_op = cifar10.train(loss, global_step)
 
-    accuracy = tf.reduce_mean(tf.cast(tf.nn.in_top_k(predictions=logits_val,
-                                                     targets=labels_val,
-                                                     k=1,
-                                                     name='top_1_op'), dtype=tf.float32))
+    val_accuracy = tf.reduce_mean(tf.cast(tf.nn.in_top_k(predictions=logits_val,
+                                                         targets=labels_val,
+                                                         k=1,
+                                                         name='top_1_op'), dtype=tf.float32))
+    train_accuracy = tf.reduce_mean(tf.cast(tf.nn.in_top_k(predictions=logits,
+                                                           targets=labels,
+                                                           k=1,
+                                                           name='top_1_op'), dtype=tf.float32))
+
 
     class _LoggerHook(tf.train.SessionRunHook):
       """Logs loss and runtime."""
@@ -94,7 +100,7 @@ def train():
 
       def before_run(self, run_context):
         self._step += 1
-        return tf.train.SessionRunArgs([loss, accuracy])  # Asks for loss value.
+        return tf.train.SessionRunArgs([loss, train_accuracy, val_accuracy])  # Asks for loss value.
 
       def after_run(self, run_context, run_values):
         if self._step % FLAGS.log_frequency == 0:
@@ -103,15 +109,18 @@ def train():
           self._start_time = current_time
 
           loss_value = run_values.results[0]
-          val_acc = run_values.results[1]
+          train_acc = run_values.results[1]
+          val_acc = run_values.results[2]
 
           examples_per_sec = FLAGS.log_frequency * FLAGS.batch_size / duration
           sec_per_batch = float(duration / FLAGS.log_frequency)
 
-          format_str = ('%s: step %d, loss = %.5f, val_acc = %.5f '
+          format_str = ('%s: step %d, loss = %.5f, train_acc = %.5f, val_acc = %.5f '
                         '(%.1f examples/sec; %.3fsec/batch)')
-          print (format_str % (datetime.now(), self._step, loss_value, val_acc,
+          print (format_str % (datetime.now(), self._step, loss_value, train_acc, val_acc,
                                examples_per_sec, sec_per_batch))
+
+          sys.stdout.flush()
 
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=FLAGS.train_dir,

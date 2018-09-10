@@ -200,7 +200,7 @@ def inference(images):
   # by replacing all instances of tf.get_variable() with tf.Variable().
   #
   # conv1
-  with tf.variable_scope('conv1') as scope:
+  with tf.variable_scope('conv1', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[5, 5, 3, 64],
                                          stddev=5e-2,
@@ -219,7 +219,7 @@ def inference(images):
                     name='norm1')
 
   # conv2
-  with tf.variable_scope('conv2') as scope:
+  with tf.variable_scope('conv2', reuse=tf.AUTO_REUSE) as scope:
     kernel = _variable_with_weight_decay('weights',
                                          shape=[5, 5, 64, 64],
                                          stddev=5e-2,
@@ -238,7 +238,7 @@ def inference(images):
                          strides=[1, 2, 2, 1], padding='SAME', name='pool2')
 
   # local3
-  with tf.variable_scope('local3') as scope:
+  with tf.variable_scope('local3', reuse=tf.AUTO_REUSE) as scope:
     # Move everything into depth so we can perform a single matrix multiply.
     reshape = tf.reshape(pool2, [images.get_shape().as_list()[0], -1])
     dim = reshape.get_shape()[1].value
@@ -249,7 +249,7 @@ def inference(images):
     _activation_summary(local3)
 
   # local4
-  with tf.variable_scope('local4') as scope:
+  with tf.variable_scope('local4', reuse=tf.AUTO_REUSE) as scope:
     weights = _variable_with_weight_decay('weights', shape=[384, 192],
                                           stddev=0.04, wd=0.004)
     biases = _variable_on_cpu('biases', [192], tf.constant_initializer(0.1))
@@ -260,7 +260,7 @@ def inference(images):
   # We don't apply softmax here because
   # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
   # and performs the softmax internally for efficiency.
-  with tf.variable_scope('softmax_linear') as scope:
+  with tf.variable_scope('softmax_linear', reuse=tf.AUTO_REUSE) as scope:
     weights = _variable_with_weight_decay('weights', [192, NUM_CLASSES],
                                           stddev=1/192.0, wd=None)
     biases = _variable_on_cpu('biases', [NUM_CLASSES],
@@ -271,7 +271,13 @@ def inference(images):
   return softmax_linear
 
 
-def loss(logits, labels):
+def _kl_divergence(x, y, name=None):
+    X = tf.distributions.Categorical(logits=x)
+    Y = tf.distributions.Categorical(logits=y)
+    return tf.reduce_mean(tf.distributions.kl_divergence(X, Y), name=name)
+
+
+def loss(logits, labels, logits_val):
   """Add L2Loss to all the trainable variables.
 
   Add summary for "Loss" and "Loss/avg".
@@ -289,6 +295,17 @@ def loss(logits, labels):
       labels=labels, logits=logits, name='cross_entropy_per_example')
   cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
   tf.add_to_collection('losses', cross_entropy_mean)
+
+  probabilities_train = tf.add(tf.nn.softmax(logits), tf.constant(0.0001))
+  probabilities_val = tf.add(tf.nn.softmax(logits_val), tf.constant(0.0001))
+
+  for i in range(cifar10_input.NUM_CLASSES):
+    hist_train = tf.histogram_fixed_width(tf.log(probabilities_train[:,i]), [0., 1.])
+    hist_train = tf.divide(tf.cast(hist_train, tf.float32), tf.constant(100.))
+    hist_val = tf.histogram_fixed_width(tf.log(probabilities_val[:,i]), [0., 1.])
+    hist_val = tf.divide(tf.cast(hist_val, tf.float32), tf.constant(100.))
+    tf.add_to_collection('losses', _kl_divergence(hist_train, hist_val, 'kl_divergence_%d' % i))
+
 
   # The total loss is defined as the cross entropy loss plus all of the weight
   # decay terms (L2 loss).

@@ -268,16 +268,20 @@ def inference(images):
     softmax_linear = tf.add(tf.matmul(local4, weights), biases, name=scope.name)
     _activation_summary(softmax_linear)
 
-  return softmax_linear
+  return softmax_linear, conv1
 
 
-def _kl_divergence(x, y, name=None):
-    X = tf.distributions.Categorical(logits=x)
-    Y = tf.distributions.Categorical(logits=y)
-    return tf.reduce_mean(tf.distributions.kl_divergence(X, Y), name=name)
+def _layer_diff_loss(layer1, layer2, name):
+  mean1, var1 = tf.nn.moments(layer1, axes=[0])
+  mean2, var2 = tf.nn.moments(layer2, axes=[0])
+  # mean1, mean2 = tf.nn.l2_normalize(mean1), tf.nn.l2_normalize(mean2)
+  # var1, var2 = tf.nn.l2_normalize(var1), tf.nn.l2_normalize(var2)
+  mean_difference = tf.nn.l2_loss(mean1 - mean2)
+  # var_difference = tf.norm(var1 - var2)
+  # return -tf.reduce_sum(mean_difference)/(tf.norm(mean1)*tf.norm(mean2))
+  return mean_difference/10
 
-
-def loss(logits, labels, logits_val):
+def loss(layers_train, labels, layers_val):
   """Add L2Loss to all the trainable variables.
 
   Add summary for "Loss" and "Loss/avg".
@@ -292,21 +296,14 @@ def loss(logits, labels, logits_val):
   # Calculate the average cross entropy loss across the batch.
   labels = tf.cast(labels, tf.int64)
   cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-      labels=labels, logits=logits, name='cross_entropy_per_example')
-  cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-  tf.add_to_collection('losses', cross_entropy_mean)
+      labels=labels, logits=layers_train[0], name='cross_entropy_per_example')
 
-  probabilities_train = tf.add(tf.nn.softmax(logits), tf.constant(0.0001))
-  probabilities_val = tf.add(tf.nn.softmax(logits_val), tf.constant(0.0001))
-
-  for i in range(cifar10_input.NUM_CLASSES):
-    hist_denom = tf.cast(tf.constant(FLAGS.batch_size), tf.float32) 
-    hist_train = tf.histogram_fixed_width(tf.log(probabilities_train[:,i]), [0., 1.], nbins=10)
-    hist_train = tf.divide(tf.cast(hist_train, tf.float32), hist_denom)
-    hist_val = tf.histogram_fixed_width(tf.log(probabilities_val[:,i]), [0., 1.], nbins=10)
-    hist_val = tf.divide(tf.cast(hist_val, tf.float32), hist_denom)
-    tf.add_to_collection('losses', _kl_divergence(hist_train, hist_val, 'kl_divergence_%d' % i))
-
+  tf.add_to_collection('losses', tf.reduce_mean(cross_entropy, name='cross_entropy'))
+  tf.add_to_collection('losses', _layer_diff_loss(layers_train[1], layers_val[1], "layer1_diff"))
+  # tf.add_to_collection('losses', _layer_diff_loss(layers_train[2], layers_val[2], "layer2_diff"))
+  # tf.add_to_collection('losses', _layer_diff_loss(layers_train[3], layers_val[3], "layer3_diff"))
+  # tf.add_to_collection('losses', _layer_diff_loss(layers_train[4], layers_val[4], "layer4_diff"))
+  # tf.add_to_collection('losses', _layer_diff_loss(layers_train[0], layers_val[0], "logits_diff"))
 
   # The total loss is defined as the cross entropy loss plus all of the weight
   # decay terms (L2 loss).

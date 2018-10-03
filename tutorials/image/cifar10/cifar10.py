@@ -66,7 +66,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = cifar10_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 MOVING_AVERAGE_DECAY = 0.9999     # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0      # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.1       # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.05       # Initial learning rate.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -271,15 +271,23 @@ def inference(images):
   return softmax_linear, conv1
 
 
+def _kl_divergence(x, y, name=None):
+  X = tf.distributions.Categorical(logits=x)
+  Y = tf.distributions.Categorical(logits=y)
+
+  return tf.reduce_mean(tf.distributions.kl_divergence(X, Y), name=name)
+
 def _layer_diff_loss(layer1, layer2, name):
-  mean1, var1 = tf.nn.moments(layer1, axes=[0])
-  mean2, var2 = tf.nn.moments(layer2, axes=[0])
-  # mean1, mean2 = tf.nn.l2_normalize(mean1), tf.nn.l2_normalize(mean2)
-  # var1, var2 = tf.nn.l2_normalize(var1), tf.nn.l2_normalize(var2)
-  mean_difference = tf.nn.l2_loss(mean1 - mean2)
-  # var_difference = tf.norm(var1 - var2)
-  # return -tf.reduce_sum(mean_difference)/(tf.norm(mean1)*tf.norm(mean2))
-  return mean_difference/10
+  layer1 = tf.reshape(layer1, [FLAGS.batch_size, -1])
+  layer2 = tf.reshape(layer2, [FLAGS.batch_size, -1])
+  layer1 = tf.nn.softmax(layer1, axis=-1)
+  layer2 = tf.nn.softmax(layer2, axis=-1)
+
+  a2 = tf.matmul(layer1, layer2, transpose_b=True)
+  b2 = tf.matmul(layer2, layer2, transpose_b=True)
+  ab = tf.matmul(layer1, layer2, transpose_b=True)
+
+  return tf.reduce_mean(a2-2*ab+b2)
 
 def loss(layers_train, labels, layers_val):
   """Add L2Loss to all the trainable variables.
@@ -303,7 +311,7 @@ def loss(layers_train, labels, layers_val):
   # tf.add_to_collection('losses', _layer_diff_loss(layers_train[2], layers_val[2], "layer2_diff"))
   # tf.add_to_collection('losses', _layer_diff_loss(layers_train[3], layers_val[3], "layer3_diff"))
   # tf.add_to_collection('losses', _layer_diff_loss(layers_train[4], layers_val[4], "layer4_diff"))
-  # tf.add_to_collection('losses', _layer_diff_loss(layers_train[0], layers_val[0], "logits_diff"))
+  tf.add_to_collection('losses', _layer_diff_loss(layers_train[0], layers_val[0], "logits_diff"))
 
   # The total loss is defined as the cross entropy loss plus all of the weight
   # decay terms (L2 loss).
